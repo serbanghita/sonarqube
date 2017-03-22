@@ -32,6 +32,7 @@ import org.sonar.server.organization.DefaultOrganization;
 import org.sonar.server.organization.DefaultOrganizationProvider;
 import org.sonar.server.organization.OrganizationFlags;
 import org.sonar.server.user.UserSession;
+import org.sonar.server.user.index.UserIndexer;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static org.sonar.db.permission.OrganizationPermission.ADMINISTER;
@@ -48,14 +49,16 @@ public class DeleteAction implements OrganizationsWsAction {
   private final DefaultOrganizationProvider defaultOrganizationProvider;
   private final ComponentCleanerService componentCleanerService;
   private final OrganizationFlags organizationFlags;
+  private final UserIndexer userIndexer;
 
   public DeleteAction(UserSession userSession, DbClient dbClient, DefaultOrganizationProvider defaultOrganizationProvider,
-    ComponentCleanerService componentCleanerService, OrganizationFlags organizationFlags) {
+    ComponentCleanerService componentCleanerService, OrganizationFlags organizationFlags, UserIndexer userIndexer) {
     this.userSession = userSession;
     this.dbClient = dbClient;
     this.defaultOrganizationProvider = defaultOrganizationProvider;
     this.componentCleanerService = componentCleanerService;
     this.organizationFlags = organizationFlags;
+    this.userIndexer = userIndexer;
   }
 
   @Override
@@ -125,9 +128,11 @@ public class DeleteAction implements OrganizationsWsAction {
   }
 
   private void deleteOrganization(OrganizationDto organizationDto, DbSession dbSession) {
+    List<String> logins = dbClient.organizationMemberDao().selectLoginsByOrganizationUuid(dbSession, organizationDto.getUuid());
     dbClient.organizationMemberDao().deleteByOrganizationUuid(dbSession, organizationDto.getUuid());
     dbClient.organizationDao().deleteByKey(dbSession, organizationDto.getKey());
     dbSession.commit();
+    userIndexer.index(logins);
   }
 
   private static void preventDeletionOfDefaultOrganization(String key, DefaultOrganization defaultOrganization) {
