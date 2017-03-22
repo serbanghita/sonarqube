@@ -21,6 +21,7 @@ package org.sonar.server.organization;
 
 import java.util.Collections;
 import java.util.List;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -42,6 +43,11 @@ import org.sonar.db.user.GroupDto;
 import org.sonar.db.user.UserDto;
 import org.sonar.db.user.UserMembershipDto;
 import org.sonar.db.user.UserMembershipQuery;
+import org.sonar.server.es.EsTester;
+import org.sonar.server.user.index.UserDoc;
+import org.sonar.server.user.index.UserIndex;
+import org.sonar.server.user.index.UserIndexDefinition;
+import org.sonar.server.user.index.UserIndexer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -51,7 +57,6 @@ import static org.mockito.Mockito.when;
 import static org.sonar.server.organization.OrganizationCreation.NewOrganization.newOrganizationBuilder;
 
 public class OrganizationCreationImplTest {
-  private static final int SOME_USER_ID = 1;
   private static final String SOME_UUID = "org-uuid";
   private static final long SOME_DATE = 12893434L;
   private static final String A_LOGIN = "a-login";
@@ -59,6 +64,7 @@ public class OrganizationCreationImplTest {
   private static final String STRING_64_CHARS = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   private static final String A_NAME = "a name";
   private static final int ANYONE_GROUP_ID = 0;
+
 
   private OrganizationCreation.NewOrganization FULL_POPULATED_NEW_ORGANIZATION = newOrganizationBuilder()
     .setName("a-name")
@@ -73,6 +79,8 @@ public class OrganizationCreationImplTest {
   @Rule
   public DbTester dbTester = DbTester.create(system2);
   @Rule
+  public EsTester es = new EsTester(new UserIndexDefinition(new MapSettings()));
+  @Rule
   public ExpectedException expectedException = ExpectedException.none();
 
   private DbSession dbSession = dbTester.getSession();
@@ -82,15 +90,25 @@ public class OrganizationCreationImplTest {
   private UuidFactory uuidFactory = mock(UuidFactory.class);
   private OrganizationValidation organizationValidation = mock(OrganizationValidation.class);
   private MapSettings settings = new MapSettings();
+  private UserIndexer userIndexer = new UserIndexer(dbClient, es.client());
+  private UserIndex userIndex = new UserIndex(es.client());
 
-  private OrganizationCreationImpl underTest = new OrganizationCreationImpl(dbClient, system2, uuidFactory, organizationValidation, settings);
+  private OrganizationCreationImpl underTest = new OrganizationCreationImpl(dbTester.getDbClient(), system2, uuidFactory, organizationValidation, settings, userIndexer);
+
+  private UserDto someUser;
+
+  @Before
+  public void setUp() {
+    someUser = dbTester.users().insertUser();
+    userIndexer.index(someUser.getLogin());
+  }
 
   @Test
   public void create_throws_NPE_if_NewOrganization_arg_is_null() throws OrganizationCreation.KeyConflictException {
     expectedException.expect(NullPointerException.class);
     expectedException.expectMessage("newOrganization can't be null");
 
-    underTest.create(dbSession, SOME_USER_ID, null);
+    underTest.create(dbSession, someUser, null);
   }
 
   @Test
@@ -103,7 +121,7 @@ public class OrganizationCreationImplTest {
 
   private void createThrowsExceptionThrownByOrganizationValidation() throws OrganizationCreation.KeyConflictException {
     try {
-      underTest.create(dbSession, SOME_USER_ID, FULL_POPULATED_NEW_ORGANIZATION);
+      underTest.create(dbSession, someUser, FULL_POPULATED_NEW_ORGANIZATION);
       fail(exceptionThrownByOrganizationValidation + " should have been thrown");
     } catch (IllegalArgumentException e) {
       assertThat(e).isSameAs(exceptionThrownByOrganizationValidation);
@@ -138,14 +156,14 @@ public class OrganizationCreationImplTest {
     expectedException.expect(OrganizationCreation.KeyConflictException.class);
     expectedException.expectMessage("Organization key '" + FULL_POPULATED_NEW_ORGANIZATION.getKey() + "' is already used");
 
-    underTest.create(dbSession, SOME_USER_ID, FULL_POPULATED_NEW_ORGANIZATION);
+    underTest.create(dbSession, someUser, FULL_POPULATED_NEW_ORGANIZATION);
   }
 
   @Test
   public void create_creates_unguarded_organization_with_properties_from_NewOrganization_arg() throws OrganizationCreation.KeyConflictException {
     mockForSuccessfulInsert(SOME_UUID, SOME_DATE);
 
-    underTest.create(dbSession, SOME_USER_ID, FULL_POPULATED_NEW_ORGANIZATION);
+    underTest.create(dbSession, someUser, FULL_POPULATED_NEW_ORGANIZATION);
 
     OrganizationDto organization = dbClient.organizationDao().selectByKey(dbSession, FULL_POPULATED_NEW_ORGANIZATION.getKey()).get();
     assertThat(organization.getUuid()).isEqualTo(SOME_UUID);
@@ -163,10 +181,9 @@ public class OrganizationCreationImplTest {
   @Test
   public void create_creates_owners_group_with_all_permissions_for_new_organization_and_add_current_user_to_it() throws OrganizationCreation.KeyConflictException {
     UserDto user = dbTester.users().insertUser();
-
     mockForSuccessfulInsert(SOME_UUID, SOME_DATE);
 
-    underTest.create(dbSession, user.getId(), FULL_POPULATED_NEW_ORGANIZATION);
+    underTest.create(dbSession, user, FULL_POPULATED_NEW_ORGANIZATION);
 
     verifyGroupOwners(user, FULL_POPULATED_NEW_ORGANIZATION.getKey(), FULL_POPULATED_NEW_ORGANIZATION.getName());
   }
@@ -175,7 +192,7 @@ public class OrganizationCreationImplTest {
   public void create_does_not_require_description_url_and_avatar_to_be_non_null() throws OrganizationCreation.KeyConflictException {
     mockForSuccessfulInsert(SOME_UUID, SOME_DATE);
 
-    underTest.create(dbSession, SOME_USER_ID, newOrganizationBuilder()
+    underTest.create(dbSession, someUser, newOrganizationBuilder()
       .setKey("key")
       .setName("name")
       .build());
@@ -194,7 +211,7 @@ public class OrganizationCreationImplTest {
   public void create_creates_default_template_for_new_organization() throws OrganizationCreation.KeyConflictException {
     mockForSuccessfulInsert(SOME_UUID, SOME_DATE);
 
-    underTest.create(dbSession, SOME_USER_ID, FULL_POPULATED_NEW_ORGANIZATION);
+    underTest.create(dbSession, someUser, FULL_POPULATED_NEW_ORGANIZATION);
 
     OrganizationDto organization = dbClient.organizationDao().selectByKey(dbSession, FULL_POPULATED_NEW_ORGANIZATION.getKey()).get();
     GroupDto ownersGroup = dbClient.groupDao().selectByName(dbSession, organization.getUuid(), "Owners").get();
@@ -213,11 +230,17 @@ public class OrganizationCreationImplTest {
 
   @Test
   public void create_add_current_user_as_member_of_organization() throws OrganizationCreation.KeyConflictException {
+    UserDto user = dbTester.users().insertUser();
+    userIndexer.index(user.getLogin());
+    UserDoc userDoc = userIndex.getNullableByLogin(user.getLogin());
+
     mockForSuccessfulInsert(SOME_UUID, SOME_DATE);
+    userIndexer.index(someUser.getLogin());
 
-    underTest.create(dbSession, SOME_USER_ID, FULL_POPULATED_NEW_ORGANIZATION);
+    underTest.create(dbSession, someUser, FULL_POPULATED_NEW_ORGANIZATION);
 
-    assertThat(dbClient.organizationMemberDao().select(dbSession, SOME_UUID, SOME_USER_ID)).isPresent();
+    assertThat(dbClient.organizationMemberDao().select(dbSession, SOME_UUID, someUser.getId())).isPresent();
+    assertThat(userIndex.getNullableByLogin(someUser.getLogin()).organizationUuids()).contains(SOME_UUID);
   }
 
   @Test

@@ -42,6 +42,7 @@ import org.sonar.db.permission.template.PermissionTemplateDto;
 import org.sonar.db.user.GroupDto;
 import org.sonar.db.user.UserDto;
 import org.sonar.db.user.UserGroupDto;
+import org.sonar.server.user.index.UserIndexer;
 
 import static com.google.common.base.Preconditions.checkState;
 import static java.lang.String.format;
@@ -55,18 +56,20 @@ public class OrganizationCreationImpl implements OrganizationCreation {
   private final UuidFactory uuidFactory;
   private final OrganizationValidation organizationValidation;
   private final Settings settings;
+  private final UserIndexer userIndexer;
 
   public OrganizationCreationImpl(DbClient dbClient, System2 system2, UuidFactory uuidFactory,
-    OrganizationValidation organizationValidation, Settings settings) {
+    OrganizationValidation organizationValidation, Settings settings, UserIndexer userIndexer) {
     this.dbClient = dbClient;
     this.system2 = system2;
     this.uuidFactory = uuidFactory;
     this.organizationValidation = organizationValidation;
     this.settings = settings;
+    this.userIndexer = userIndexer;
   }
 
   @Override
-  public OrganizationDto create(DbSession dbSession, int creatorUserId, NewOrganization newOrganization) throws KeyConflictException {
+  public OrganizationDto create(DbSession dbSession, UserDto userCreator, NewOrganization newOrganization) throws KeyConflictException {
     validate(newOrganization);
     String key = newOrganization.getKey();
     if (organizationKeyIsUsed(dbSession, key)) {
@@ -75,12 +78,14 @@ public class OrganizationCreationImpl implements OrganizationCreation {
 
     OrganizationDto organization = insertOrganization(dbSession, newOrganization, dto -> {
     });
-    insertOrganizationMember(dbSession, organization, creatorUserId);
+    insertOrganizationMember(dbSession, organization, userCreator.getId());
     GroupDto group = insertOwnersGroup(dbSession, organization);
     insertDefaultTemplate(dbSession, organization, group);
-    addCurrentUserToGroup(dbSession, group, creatorUserId);
+    addCurrentUserToGroup(dbSession, group, userCreator.getId());
 
     dbSession.commit();
+
+    userIndexer.index(userCreator.getLogin());
 
     return organization;
   }
@@ -110,6 +115,8 @@ public class OrganizationCreationImpl implements OrganizationCreation {
     insertOrganizationMember(dbSession, organization, newUser.getId());
 
     dbSession.commit();
+
+    userIndexer.index(newUser.getLogin());
 
     return Optional.of(organization);
   }

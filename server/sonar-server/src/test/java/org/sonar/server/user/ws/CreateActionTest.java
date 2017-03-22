@@ -86,7 +86,7 @@ public class CreateActionTest {
   private WsActionTester tester = new WsActionTester(new CreateAction(
     db.getDbClient(),
     new UserUpdater(mock(NewUserNotifier.class), settings, db.getDbClient(), userIndexer, system2, defaultOrganizationProvider,
-      new OrganizationCreationImpl(db.getDbClient(), system2, UuidFactoryFast.getInstance(), new OrganizationValidationImpl(), settings)),
+      new OrganizationCreationImpl(db.getDbClient(), system2, UuidFactoryFast.getInstance(), new OrganizationValidationImpl(), settings, userIndexer)),
     userSessionRule));
 
   @Before
