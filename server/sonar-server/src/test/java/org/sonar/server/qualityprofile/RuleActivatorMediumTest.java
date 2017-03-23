@@ -506,7 +506,7 @@ public class RuleActivatorMediumTest {
     activate(activation, XOO_P1_KEY);
 
     // deactivation
-    ruleActivator.deactivate(ActiveRuleKey.of(XOO_P1_KEY, XOO_X1));
+    ruleActivator.deactivateAndUpdateIndex(dbSession, ActiveRuleKey.of(XOO_P1_KEY, XOO_X1));
 
     verifyZeroActiveRules(XOO_P1_KEY);
     assertProfileHasBeenUpdatedManually(XOO_P1_KEY);
@@ -516,7 +516,7 @@ public class RuleActivatorMediumTest {
   public void ignore_deactivation_if_rule_not_activated() {
     // deactivation
     ActiveRuleKey key = ActiveRuleKey.of(XOO_P1_KEY, XOO_X1);
-    ruleActivator.deactivate(key);
+    ruleActivator.deactivateAndUpdateIndex(dbSession, key);
 
     verifyZeroActiveRules(XOO_P1_KEY);
   }
@@ -525,7 +525,7 @@ public class RuleActivatorMediumTest {
   public void deactivation_fails_if_rule_not_found() {
     ActiveRuleKey key = ActiveRuleKey.of(XOO_P1_KEY, RuleKey.of("xoo", "x3"));
     try {
-      ruleActivator.deactivate(key);
+      ruleActivator.deactivateAndUpdateIndex(dbSession, key);
       fail();
     } catch (BadRequestException e) {
       assertThat(e).hasMessage("Rule not found: xoo:x3");
@@ -537,7 +537,7 @@ public class RuleActivatorMediumTest {
   public void deactivation_fails_if_profile_not_found() {
     ActiveRuleKey key = ActiveRuleKey.of("unknown", XOO_X1);
     try {
-      ruleActivator.deactivate(key);
+      ruleActivator.deactivateAndUpdateIndex(dbSession, key);
       fail();
     } catch (BadRequestException e) {
       assertThat(e).hasMessage("Quality profile not found: unknown");
@@ -558,7 +558,7 @@ public class RuleActivatorMediumTest {
     dbSession.clearCache();
 
     // deactivation
-    ruleActivator.deactivate(ActiveRuleKey.of(XOO_P1_KEY, XOO_X1));
+    ruleActivator.deactivateAndUpdateIndex(dbSession, ActiveRuleKey.of(XOO_P1_KEY, XOO_X1));
 
     verifyZeroActiveRules(XOO_P1_KEY);
   }
@@ -752,7 +752,7 @@ public class RuleActivatorMediumTest {
     verifyOneActiveRuleInDb(XOO_P3_KEY, XOO_X1, BLOCKER, INHERITED, ImmutableMap.of("max", "7"));
 
     // deactivate on root
-    ruleActivator.deactivate(ActiveRuleKey.of(XOO_P1_KEY, XOO_X1));
+    ruleActivator.deactivateAndUpdateIndex(dbSession, ActiveRuleKey.of(XOO_P1_KEY, XOO_X1));
 
     verifyZeroActiveRules(XOO_P1_KEY);
     verifyZeroActiveRules(XOO_P2_KEY);
@@ -782,7 +782,7 @@ public class RuleActivatorMediumTest {
     verifyOneActiveRuleInDb(XOO_P3_KEY, XOO_X1, BLOCKER, INHERITED, ImmutableMap.of("max", "8"));
 
     // deactivate on parent -> do not propagate on children because they're overriding values
-    ruleActivator.deactivate(ActiveRuleKey.of(XOO_P1_KEY, XOO_X1));
+    ruleActivator.deactivateAndUpdateIndex(dbSession, ActiveRuleKey.of(XOO_P1_KEY, XOO_X1));
     dbSession.clearCache();
     verifyZeroActiveRules(XOO_P1_KEY);
     verifyZeroActiveRules(XOO_P2_KEY);
@@ -804,7 +804,7 @@ public class RuleActivatorMediumTest {
 
     // try to deactivate on child
     try {
-      ruleActivator.deactivate(ActiveRuleKey.of(XOO_P2_KEY, XOO_X1));
+      ruleActivator.deactivateAndUpdateIndex(dbSession, ActiveRuleKey.of(XOO_P2_KEY, XOO_X1));
       fail();
     } catch (BadRequestException e) {
       assertThat(e).hasMessage("Cannot deactivate inherited rule 'xoo:x1'");
